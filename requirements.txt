@@ -1,0 +1,4 @@
+polars==1.39.3
+requests==2.33.1
+cryptography==46.0.7
+python-dotenv==1.2.2

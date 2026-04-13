@@ -1,0 +1,11 @@
+# Ignore Environment Variables
+.env
+server/.env
+kalshi.key
+
+# Ignore large data files
+*.csv
+
+# Ignore Python environments and caches
+venv/
+__pycache__/
