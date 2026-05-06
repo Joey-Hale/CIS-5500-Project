@@ -1,25 +1,26 @@
-const { Pool, types } = require('pg');
-const config = require('./config.json');
+const { Pool, types } = require("pg");
+const config = require("./config.json");
 
 // Override the default parsing for BIGINT (PostgreSQL type ID 20) so no need to manually parse
-types.setTypeParser(20, val => parseInt(val, 10));
+types.setTypeParser(20, (val) => parseInt(val, 10));
 
 const connection = new Pool({
-    host: config.rds_host,
-    user: config.rds_user,
-    password: config.rds_password,
-    port: config.rds_port,
-    database: config.rds_db,
-    ssl: {
-        rejectUnauthorized: false,
-    },
+  host: config.rds_host,
+  user: config.rds_user,
+  password: config.rds_password,
+  port: config.rds_port,
+  database: config.rds_db,
+  ssl: {
+    rejectUnauthorized: false,
+  },
 });
 connection.connect((err) => err && console.log(err));
 
 // Route 1: GET /teams/market-bias
-const getTeamMarketBias = async function(req, res) {
-    const minGames = req.query.min_games ?? 5 ;
-    connection.query(`
+const getTeamMarketBias = async function (req, res) {
+  const minGames = req.query.min_games ?? 5;
+  connection.query(
+    `
         CREATE VIEW pregame_prices AS
         SELECT
             km.market_ticker,
@@ -88,22 +89,25 @@ const getTeamMarketBias = async function(req, res) {
             pp.target_team
         HAVING COUNT(*) >= ${minGames}
         ORDER BY avg_signed_error DESC
-    `, (err, data) => {
-        if (err) {
-            console.log(err);
-            res.json([]);
-        } else {
-            res.json(data.rows);
-        }
-    });
-}
+    `,
+    (err, data) => {
+      if (err) {
+        console.log(err);
+        res.json([]);
+      } else {
+        res.json(data.rows);
+      }
+    },
+  );
+};
 
 // Route 2: GET /games/market-swings
 
-const getLargestMarketSwings = async function(req, res) {
-    const limit = req.query.limit ?? 20;
-    
-    connection.query(`
+const getLargestMarketSwings = async function (req, res) {
+  const limit = req.query.limit ?? 20;
+
+  connection.query(
+    `
         WITH in_game_prices AS (
             SELECT
                 km.game_id,
@@ -144,23 +148,26 @@ const getLargestMarketSwings = async function(req, res) {
             ON ms.game_id = g.game_id
         ORDER BY ms.price_swing DESC
         LIMIT ${limit}
-    `, (err, data) => {
-        if (err) {
-            console.log(err);
-            res.json([])
-        } else {
-            res.json(data.rows);
-        }
-    });
-}
+    `,
+    (err, data) => {
+      if (err) {
+        console.log(err);
+        res.json([]);
+      } else {
+        res.json(data.rows);
+      }
+    },
+  );
+};
 
 // Route 3: GET /favorites/adversity-performance
 
-const getFavoriteAdversityPerformance = async function(req, res) {
-    const favoriteThreshold = req.query.favorite_threshold ?? 0.75;
-    const adversityDrop = req.query.adversity_drop ?? 0.15;
+const getFavoriteAdversityPerformance = async function (req, res) {
+  const favoriteThreshold = req.query.favorite_threshold ?? 0.75;
+  const adversityDrop = req.query.adversity_drop ?? 0.15;
 
-    connection.query(`
+  connection.query(
+    `
         WITH favorites AS (
             SELECT
                 pp.game_id,
@@ -263,20 +270,23 @@ const getFavoriteAdversityPerformance = async function(req, res) {
         FROM favorite_results
         GROUP BY experienced_major_adversity
         ORDER BY experienced_major_adversity
-    `, (err, data) => {
-        if (err) {
-            console.log(err);
-            res.json([]);
-        } else {
-            res.json(data.rows);
-        }
-    });
-}
+    `,
+    (err, data) => {
+      if (err) {
+        console.log(err);
+        res.json([]);
+      } else {
+        res.json(data.rows);
+      }
+    },
+  );
+};
 
 // Route 4: GET /market/accuracy-by-week
 
-const getMarketAccuracyByWeek = async function(req, res) {
-    connection.query(`
+const getMarketAccuracyByWeek = async function (req, res) {
+  connection.query(
+    `
         WITH game_level AS (
             SELECT
                 g.week,
@@ -291,87 +301,93 @@ const getMarketAccuracyByWeek = async function(req, res) {
                 ON pp.game_id = gr.game_id
             JOIN Games g
                 ON g.game_id = pp.game_id
-            WHERE pp.rn = 1
+            WHERE pp.rn = 1 AND g.week BETWEEN 1 AND 18
         )
         SELECT
             week,
             COUNT(*) AS numberoffgames,
             ROUND(AVG(kalshi_close)::numeric, 2) AS avg_predicted,
             ROUND(AVG(win)::numeric, 2) AS actual,
-            ROUND(AVG(kalshi_close - win)::numeric, 2) AS error
+            ROUND(AVG(ABS(kalshi_close - win))::numeric, 2) AS error
         FROM game_level
         GROUP BY week
         ORDER BY week
-    `, (err, data) => {
-        if (err) {
-            console.log(err);
-            res.json([]);
-        } else {
-            res.json(data.rows);
-        }
-    });
-}
+    `,
+    (err, data) => {
+      if (err) {
+        console.log(err);
+        res.json([]);
+      } else {
+        res.json(data.rows);
+      }
+    },
+  );
+};
 
 // Route 5: GET /market/volatility-comparison
 
-const getVolatilityComparison = async function(req, res) {
-    const volatilityThreshold = req.query.volatility_threshold ?? 0.5;
+const getVolatilityComparison = async function (req, res) {
+  const volatilityThreshold = parseFloat(req.query.volatility_threshold ?? 0.5);
 
-    connection.query(`
-        CREATE VIEW game_volatility AS
+  connection.query(
+    `
+      WITH game_volatility AS (
         SELECT
-            km.game_id,
-            MAX(kp.kalshi_close) - MIN(kp.kalshi_close) AS price_swing
-        FROM Kalshi_Markets km
-        JOIN Kalshi_Prices kp
-            ON km.market_ticker = kp.market_ticker
-        GROUP BY km.game_id;
-
-
-        WITH game_level AS (
-            SELECT
-                gv.game_id,
-                gv.price_swing,
-                pp.target_team,
-                pp.kalshi_close,
-                CASE
-                    WHEN gr.winner = pp.target_team THEN 1.0
-                    ELSE 0.0
-                END AS win
-            FROM game_volatility gv
-            JOIN pregame_prices pp
-                ON gv.game_id = pp.game_id
-            JOIN game_results gr
-                ON gv.game_id = gr.game_id
-            WHERE pp.rn = 1
-        )
+          km.game_id,
+          MAX(kp.kalshi_close) - MIN(kp.kalshi_close) AS price_swing
+        FROM kalshi_markets km
+        JOIN kalshi_prices kp
+          ON km.market_ticker = kp.market_ticker
+        GROUP BY km.game_id
+      ),
+      game_level AS (
         SELECT
-            CASE
-                WHEN price_swing >= ${volatilityThreshold} THEN 'high_volatility'
-                ELSE 'low_volatility'
-            END AS volatility_group,
-            COUNT(*) AS numberofgames,
-            ROUND(AVG(kalshi_close)::numeric, 3) AS avg_predicted_prob,
-            ROUND(AVG(win)::numeric, 3) AS actual_win_rate,
-            ROUND(AVG(kalshi_close - win)::numeric, 3) AS avg_error
-        FROM game_level
-        GROUP BY volatility_group        
-    `, (err, data) => {
-        if (err) {
-            console.log(err);
-            res.json([]);
-        } else {
-            res.json(data.rows);
-        }
-    });
-}
+          gv.game_id,
+          gv.price_swing,
+          pp.target_team,
+          pp.kalshi_close,
+          CASE
+            WHEN gr.winner = pp.target_team THEN 1.0
+            ELSE 0.0
+          END AS win
+        FROM game_volatility gv
+        JOIN pregame_prices pp
+          ON gv.game_id = pp.game_id
+        JOIN game_results gr
+          ON gv.game_id = gr.game_id
+        WHERE pp.rn = 1
+      )
+      SELECT
+        CASE
+          WHEN price_swing >= $1 THEN 'high_volatility'
+          ELSE 'low_volatility'
+        END AS volatility_group,
+        COUNT(*) AS numberofgames,
+        ROUND(AVG(kalshi_close)::numeric, 3) AS avg_predicted_prob,
+        ROUND(AVG(win)::numeric, 3) AS actual_win_rate,
+        ROUND(AVG(ABS(kalshi_close - win))::numeric, 3) AS avg_error
+      FROM game_level
+      GROUP BY volatility_group;
+    `,
+    [volatilityThreshold],
+    (err, data) => {
+      if (err) {
+        console.log(err);
+        res.json([]);
+      } else {
+        res.json(data.rows);
+      }
+    },
+  );
+};
 
 // Route 6: GET /underdogs/win-rate
 
-const getUnderdogWinRate = async function(req, res) {
-    const maxProb = req.query.max_prob ?? 0.4;
+const getUnderdogWinRate = async function (req, res) {
+  const maxProb = req.query.max_prob ?? 0.4;
 
-    connection.query(`
+  connection.query(
+    `
         WITH underdogs AS (
             SELECT
                 gv.game_id,
@@ -395,58 +411,63 @@ const getUnderdogWinRate = async function(req, res) {
             SUM(win) AS underdog_wins,
             ROUND(AVG(win)::numeric, 3) AS underdog_win_rate
         FROM underdogs        
-    `, (err, data) => {
-        if (err) {
-            console.log(err);
-            res.json([]);
-        } else {
-            res.json(data.rows);
-        }
-    });
-}
+    `,
+    (err, data) => {
+      if (err) {
+        console.log(err);
+        res.json([]);
+      } else {
+        res.json(data.rows);
+      }
+    },
+  );
+};
 
 // Route 7: GET /favorites/win-rate
 
-const getFavoriteWinRate = async function(req, res) {
-    const minProb = req.query.min_prob ?? 0.5;
+const getFavoriteWinRate = async function (req, res) {
+  const minProb = parseFloat(req.query.min_prob ?? 0.5);
 
-    connection.query(`
-        CREATE VIEW favorite_summary AS
+  connection.query(
+    `
+      WITH favorite_summary AS (
         SELECT
-            pp.game_id,
-            pp.target_team AS favorite_team,
-            pp.kalshi_close AS favorite_prob,
-            CASE
-                WHEN gr.winner = pp.target_team THEN 1.0
-                ELSE 0.0
-            END AS favorite_won
+          pp.game_id,
+          pp.target_team AS favorite_team,
+          pp.kalshi_close AS favorite_prob,
+          CASE
+            WHEN gr.winner = pp.target_team THEN 1.0
+            ELSE 0.0
+          END AS favorite_won
         FROM pregame_prices pp
         JOIN game_results gr
-            ON pp.game_id = gr.game_id
-        WHERE
-            pp.rn = 1
-            AND pp.kalshi_close >= ${minProb};
-
-
-        SELECT
-            COUNT(*) AS total_games,
-            SUM(favorite_won) AS favorite_wins,
-            ROUND(AVG(favorite_won)::numeric, 3) AS favorite_win_rate
-        FROM favorite_summary       
-    `, (err, data) => {
-        if (err) {
-            console.log(err);
-            res.json([]);
-        } else {
-            res.json(data.rows);
-        }
-    });
-}
+          ON pp.game_id = gr.game_id
+        WHERE pp.rn = 1
+          AND pp.kalshi_close >= $1
+      )
+      SELECT
+        COUNT(*) AS total_games,
+        COALESCE(SUM(favorite_won), 0) AS favorite_wins,
+        ROUND(COALESCE(AVG(favorite_won), 0)::numeric, 3) AS favorite_win_rate
+      FROM favorite_summary;
+    `,
+    [minProb],
+    (err, data) => {
+      if (err) {
+        console.log(err);
+        res.json([]);
+      } else {
+        res.json(data.rows);
+      }
+    },
+  );
+};
 
 // Route 8: GET /favorites/calibration
 
-const getFavoriteCalibration = async function(req, res) {
-    connection.query(`
+const getFavoriteCalibration = async function (req, res) {
+  connection.query(
+    `
         SELECT
             CASE
                 WHEN favorite_prob >= 0.8 THEN 'strong_favorite'
@@ -459,50 +480,61 @@ const getFavoriteCalibration = async function(req, res) {
         FROM favorite_summary
         GROUP BY favorite_strength
         ORDER BY favorite_strength        
-    `, (err, data) => {
-        if (err) {
-            console.log(err);
-            res.json([]);
-        } else {
-            res.json(data.rows);
-        }
-    });
-}
+    `,
+    (err, data) => {
+      if (err) {
+        console.log(err);
+        res.json([]);
+      } else {
+        res.json(data.rows);
+      }
+    },
+  );
+};
 
 // Route 9: GET /markets/:team
 
-const getMarketHistoryByTeam = async function(req, res) {
-    const team = req.params.team;
+const getMarketHistoryByTeam = async function (req, res) {
+  const team = req.params.team.toUpperCase();
 
-    connection.query(`
+  connection.query(
+    `
         SELECT
-        market_ticker,
-        datetime_utc,
-        kalshi_open,
-        kalshi_high,
-        kalshi_low,
-        kalshi_close,
-        kalshi_volume
-        FROM your_table
-        WHERE market_ticker = '%${team}%'
-        ORDER BY datetime_utc     
-    `, (err, data) => {
-        if (err) {
-            console.log(err);
-            res.json([]);
-        } else {
-            res.json(data.rows);
-        }
-    });
-}
+            km.market_ticker,
+            km.target_team,
+            kp.datetime_utc,
+            kp.kalshi_open,
+            kp.kalshi_high,
+            kp.kalshi_low,
+            kp.kalshi_close,
+            kp.kalshi_volume
+        FROM Kalshi_Prices kp
+        JOIN Kalshi_Markets km
+            ON kp.market_ticker = km.market_ticker
+        WHERE km.target_team = $1
+        ORDER BY kp.datetime_utc DESC
+        LIMIT 500
+    `,
+    [team],
+    (err, data) => {
+      if (err) {
+        console.log(err);
+        res.json([]);
+      } else {
+        res.json(data.rows);
+      }
+    },
+  );
+};
 
 // Route 10: GET /markets/early-hype-fade
 
-const getEarlyHypeFadeMarkets = async function(req, res) {
-    const minEarlyVolumeShare = req.query.min_early_volume_share ?? 0.30;
-    const windowSize = req.query.window_size ?? 5;
+const getEarlyHypeFadeMarkets = async function (req, res) {
+  const minEarlyVolumeShare = req.query.min_early_volume_share ?? 0.3;
+  const windowSize = req.query.window_size ?? 5;
 
-    connection.query(`
+  connection.query(
+    `
         WITH ranked AS (
             SELECT
                 market_ticker,
@@ -543,25 +575,27 @@ const getEarlyHypeFadeMarkets = async function(req, res) {
         ORDER BY
             early_volume_share DESC,
             price_change ASC        
-    `, (err, data) => {
-        if (err) {
-            console.log(err);
-            res.json([]);
-        } else {
-            res.json(data.rows);
-        }
-    });
-}
+    `,
+    (err, data) => {
+      if (err) {
+        console.log(err);
+        res.json([]);
+      } else {
+        res.json(data.rows);
+      }
+    },
+  );
+};
 
 module.exports = {
-    getTeamMarketBias,
-    getLargestMarketSwings,
-    getFavoriteAdversityPerformance,
-    getMarketAccuracyByWeek,
-    getVolatilityComparison,
-    getUnderdogWinRate,
-    getFavoriteWinRate,
-    getFavoriteCalibration,
-    getMarketHistoryByTeam,
-    getEarlyHypeFadeMarkets
-}
+  getTeamMarketBias,
+  getLargestMarketSwings,
+  getFavoriteAdversityPerformance,
+  getMarketAccuracyByWeek,
+  getVolatilityComparison,
+  getUnderdogWinRate,
+  getFavoriteWinRate,
+  getFavoriteCalibration,
+  getMarketHistoryByTeam,
+  getEarlyHypeFadeMarkets,
+};

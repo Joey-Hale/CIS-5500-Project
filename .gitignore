@@ -7,5 +7,6 @@ kalshi.key
 *.csv
 
 # Ignore Python environments and caches
+node_modules/
 venv/
 __pycache__/
