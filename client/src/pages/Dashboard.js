@@ -7,16 +7,19 @@ import SummaryCards from "../components/SummaryCards";
 
 const Dashboard = () => {
   const [filters, setFilters] = useState({});
+  const [appliedFilters, setAppliedFilters] = useState({});
+
+  const handleApply = () => setAppliedFilters({ ...filters });
 
   return (
     <div className="dashboard-container">
       <h1>NFL Market Analytics Dashboard</h1>
-      <SummaryCards />
-      <FiltersPanel filters={filters} setFilters={setFilters} />
+      <FiltersPanel filters={filters} setFilters={setFilters} onApply={handleApply} />
+      <SummaryCards filters={appliedFilters} />
       <div className="visualizations">
         <MarketAccuracyChart />
         <FavoriteCalibrationChart />
-        <MarketSwingsTable />
+        <MarketSwingsTable filters={appliedFilters} />
       </div>
     </div>
   );

@@ -1,14 +1,19 @@
 import React, { useState } from "react";
 
-const FiltersPanel = ({ filters, setFilters }) => {
+const FiltersPanel = ({ filters, setFilters, onApply }) => {
   const [isExpanded, setIsExpanded] = useState(true);
 
   const handleFilterChange = (key, value) => {
     setFilters({ ...filters, [key]: value });
   };
 
+  const handleKeyDown = (e) => {
+    if (e.key === "Enter") onApply();
+  };
+
   const resetFilters = () => {
     setFilters({});
+    onApply && onApply();
   };
 
   return (
@@ -36,6 +41,7 @@ const FiltersPanel = ({ filters, setFilters }) => {
                 onChange={(e) =>
                   handleFilterChange("min_games", parseInt(e.target.value))
                 }
+                onKeyDown={handleKeyDown}
                 placeholder="Minimum games"
               />
             </div>
@@ -51,6 +57,7 @@ const FiltersPanel = ({ filters, setFilters }) => {
                 onChange={(e) =>
                   handleFilterChange("favorite_threshold", parseFloat(e.target.value))
                 }
+                onKeyDown={handleKeyDown}
                 placeholder="0.5"
               />
             </div>
@@ -66,6 +73,7 @@ const FiltersPanel = ({ filters, setFilters }) => {
                 onChange={(e) =>
                   handleFilterChange("volatility_threshold", parseFloat(e.target.value))
                 }
+                onKeyDown={handleKeyDown}
                 placeholder="0.5"
               />
             </div>
@@ -78,17 +86,19 @@ const FiltersPanel = ({ filters, setFilters }) => {
                 max="100"
                 value={filters.limit || 20}
                 onChange={(e) => handleFilterChange("limit", parseInt(e.target.value))}
+                onKeyDown={handleKeyDown}
                 placeholder="Limit results"
               />
             </div>
 
-            <button
-              className="filter-button"
-              onClick={resetFilters}
-              style={{ marginTop: "1.5rem" }}
-            >
-              Reset Filters
-            </button>
+            <div style={{ display: "flex", gap: "0.75rem", marginTop: "1.5rem" }}>
+              <button className="filter-button" onClick={onApply}>
+                Apply Filters
+              </button>
+              <button className="filter-button" onClick={resetFilters}>
+                Reset Filters
+              </button>
+            </div>
           </div>
 
           <div

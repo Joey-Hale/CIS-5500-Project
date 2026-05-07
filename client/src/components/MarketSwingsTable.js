@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 const config = require("../config.json");
 
-const MarketSwingsTable = () => {
+const MarketSwingsTable = ({ filters = {} }) => {
   const [data, setData] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -9,8 +9,9 @@ const MarketSwingsTable = () => {
   const [sortOrder, setSortOrder] = useState("desc");
 
   useEffect(() => {
+    const limit = filters.limit || 50;
     fetch(
-      `http://${config.server_host}:${config.server_port}/games/market-swings?limit=50`
+      `http://${config.server_host}:${config.server_port}/games/market-swings?limit=${limit}`
     )
       .then((res) => res.json())
       .then((json) => {
@@ -22,7 +23,7 @@ const MarketSwingsTable = () => {
         setError("Failed to load market swings data");
         setLoading(false);
       });
-  }, []);
+  }, [filters]);
 
   const handleSort = (key) => {
     if (sortBy === key) {
@@ -71,6 +72,7 @@ const MarketSwingsTable = () => {
       <h2>Biggest Market Swings</h2>
       <p style={{ color: "#757575", marginBottom: "1rem" }}>
         Top {sortedData.length} games with largest price movements during play
+        {filters.limit ? ` (limit: ${filters.limit})` : ""}
       </p>
       <table>
         <thead>

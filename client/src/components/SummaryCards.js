@@ -1,14 +1,16 @@
 import React, { useEffect, useState } from "react";
 const config = require("../config.json");
 
-const SummaryCards = () => {
+const SummaryCards = ({ filters = {} }) => {
   const [cards, setCards] = useState([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const fetchData = async () => {
+      const minProb = filters.favorite_threshold || 0.5;
+      const volatilityThreshold = filters.volatility_threshold || 0.5;
+
       try {
-        // Fetch multiple endpoints
         const [
           favoriteWinRateRes,
           underdogWinRateRes,
@@ -16,13 +18,13 @@ const SummaryCards = () => {
           accuracyRes,
         ] = await Promise.all([
           fetch(
-            `http://${config.server_host}:${config.server_port}/favorites/win-rate`
+            `http://${config.server_host}:${config.server_port}/favorites/win-rate?min_prob=${minProb}`
           ),
           fetch(
-            `http://${config.server_host}:${config.server_port}/underdogs/win-rate`
+            `http://${config.server_host}:${config.server_port}/underdogs/win-rate?max_prob=${(1 - minProb).toFixed(2)}`
           ),
           fetch(
-            `http://${config.server_host}:${config.server_port}/market/volatility-comparison?volatility_threshold=0.05`
+            `http://${config.server_host}:${config.server_port}/market/volatility-comparison?volatility_threshold=${volatilityThreshold}`
           ),
           fetch(
             `http://${config.server_host}:${config.server_port}/market/accuracy-by-week`
@@ -93,11 +95,18 @@ const SummaryCards = () => {
     };
 
     fetchData();
-  }, []);
+  }, [filters]);
 
   if (loading) return <div className="loading">Loading summary cards</div>;
 
+  const minProb = filters.favorite_threshold || 0.5;
+  const volThreshold = filters.volatility_threshold || 0.5;
+
   return (
+    <div>
+    <p style={{ fontSize: "0.85rem", color: "#757575", marginBottom: "0.5rem" }}>
+      Favorites: win probability ≥ {minProb} &nbsp;·&nbsp; Underdogs: win probability ≤ {(1 - minProb).toFixed(2)} &nbsp;·&nbsp; Volatility threshold: {volThreshold}
+    </p>
     <div className="summary-cards">
       {cards.map((card, idx) => (
         <div key={idx} className={`card ${card.type}`}>
@@ -106,6 +115,7 @@ const SummaryCards = () => {
           <div className="subtext">{card.subtext}</div>
         </div>
       ))}
+    </div>
     </div>
   );
 };
