@@ -90,8 +90,8 @@ const FiltersPanel = ({ filters, setFilters, onApply }) => {
 
       {isExpanded && (
         <>
-          {/* <div className="filter-group" style={{ marginTop: "1.5rem" }}>
-            <div className="filter-item">
+          <div className="filter-group" style={{ marginTop: "1.5rem" }}>
+            {/* <div className="filter-item">
               <label>Min Games for Analysis</label>
               <input
                 type="number"
