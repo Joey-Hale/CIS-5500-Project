@@ -26,18 +26,35 @@ const FiltersPanel = ({ filters, setFilters, onApply }) => {
     });
   };
 
+  // const buildAppliedFilters = () => {
+  //   const nextFilters = {};
+
+  //   Object.entries({ ...DEFAULT_FILTERS, ...filters }).forEach(([key, value]) => {
+  //     if (value === "" || value === null || value === undefined) return;
+
+  //     const parsed = Number(value);
+
+  //     if (!Number.isNaN(parsed)) {
+  //       nextFilters[key] = parsed;
+  //     }
+  //   });
+
+  //   return nextFilters;
+  // };
   const buildAppliedFilters = () => {
     const nextFilters = {};
 
-    Object.entries({ ...DEFAULT_FILTERS, ...filters }).forEach(([key, value]) => {
-      if (value === "" || value === null || value === undefined) return;
+    Object.entries(filters)
+      .filter(([key]) => Object.prototype.hasOwnProperty.call(FILTER_LABELS, key))
+      .forEach(([key, value]) => {
+        if (value === "" || value === null || value === undefined) return;
 
-      const parsed = Number(value);
+        const parsed = Number(value);
 
-      if (!Number.isNaN(parsed)) {
-        nextFilters[key] = parsed;
-      }
-    });
+        if (!Number.isNaN(parsed)) {
+          nextFilters[key] = parsed;
+        }
+      });
 
     return nextFilters;
   };
@@ -67,13 +84,21 @@ const FiltersPanel = ({ filters, setFilters, onApply }) => {
     return value;
   };
 
-  const activeFilters = Object.entries({ ...DEFAULT_FILTERS, ...filters })
-    .map(([key, value]) => ({
-      key,
-      label: FILTER_LABELS[key] || key,
-      value: formatFilterValue(key, value),
-    }))
-    .filter((filter) => filter.value !== null);
+  // const activeFilters = Object.entries({ ...DEFAULT_FILTERS, ...filters })
+  //   .map(([key, value]) => ({
+  //     key,
+  //     label: FILTER_LABELS[key] || key,
+  //     value: formatFilterValue(key, value),
+  //   }))
+  //   .filter((filter) => filter.value !== null);
+  const activeFilters = Object.entries(filters)
+  .filter(([key]) => Object.prototype.hasOwnProperty.call(FILTER_LABELS, key))
+  .map(([key, value]) => ({
+    key,
+    label: FILTER_LABELS[key],
+    value: formatFilterValue(key, value),
+  }))
+  .filter((filter) => filter.value !== null);
 
   return (
     <div className="filters-panel">
