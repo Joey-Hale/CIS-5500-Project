@@ -1,14 +1,12 @@
 import React, { useState } from "react";
 
 const DEFAULT_FILTERS = {
-  min_games: "5",
   favorite_threshold: "0.5",
   volatility_threshold: "0.5",
   limit: "20",
 };
 
 const FILTER_LABELS = {
-  min_games: "Min Games",
   favorite_threshold: "Favorite Threshold",
   volatility_threshold: "Volatility Threshold",
   limit: "Results Limit",
@@ -92,7 +90,7 @@ const FiltersPanel = ({ filters, setFilters, onApply }) => {
 
       {isExpanded && (
         <>
-          <div className="filter-group" style={{ marginTop: "1.5rem" }}>
+          {/* <div className="filter-group" style={{ marginTop: "1.5rem" }}>
             <div className="filter-item">
               <label>Min Games for Analysis</label>
               <input
@@ -103,7 +101,7 @@ const FiltersPanel = ({ filters, setFilters, onApply }) => {
                 onKeyDown={handleKeyDown}
                 placeholder="Minimum games"
               />
-            </div>
+            </div> */}
 
             <div className="filter-item">
               <label>Favorite Threshold (Probability)</label>
