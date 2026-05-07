@@ -11,7 +11,9 @@ const Dashboard = () => {
   const [appliedFilters, setAppliedFilters] = useState({});
   const [coverage, setCoverage] = useState(null);
 
-  const handleApply = () => setAppliedFilters({ ...filters });
+  const handleApply = (nextFilters = filters) => {
+    setAppliedFilters({ ...nextFilters });
+  };
 
   useEffect(() => {
     fetch(`http://${config.server_host}:${config.server_port}/games/coverage`)
