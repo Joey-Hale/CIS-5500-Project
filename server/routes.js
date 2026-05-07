@@ -1,6 +1,19 @@
 const { Pool, types } = require("pg");
 const config = require("./config.json");
 
+// Simple in-memory cache for expensive queries
+const cache = new Map();
+const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
+function getCached(key) {
+  const entry = cache.get(key);
+  if (entry && Date.now() - entry.ts < CACHE_TTL) return entry.data;
+  return null;
+}
+function setCached(key, data) {
+  cache.set(key, { data, ts: Date.now() });
+}
+
 // Override the default parsing for BIGINT (PostgreSQL type ID 20) so no need to manually parse
 types.setTypeParser(20, (val) => parseInt(val, 10));
 
@@ -131,120 +144,70 @@ const getLargestMarketSwings = async function (req, res) {
 // Route 3: GET /favorites/adversity-performance
 
 const getFavoriteAdversityPerformance = async function (req, res) {
-  const favoriteThreshold = parseFloat(req.query.favorite_threshold ?? 0.75);
-  const adversityDrop = parseFloat(req.query.adversity_drop ?? 0.15);
+  const favoriteThreshold = parseFloat(req.query.favorite_threshold ?? 0.65);
+  const adversityDrop = parseFloat(req.query.adversity_drop ?? 0.25);
+  const cacheKey = `adversity-${favoriteThreshold}-${adversityDrop}`;
+  const cached = getCached(cacheKey);
+  if (cached) return res.json(cached);
 
   connection.query(
     `
         WITH favorites AS (
-            SELECT
-                pp.game_id,
-                pp.target_team AS favorite_team,
-                pp.kalshi_close AS pregame_prob
-            FROM pregame_prices pp
-            WHERE
-                pp.rn = 1
-                AND pp.kalshi_close >= $1
+            SELECT game_id, target_team AS favorite_team, kalshi_close AS pregame_prob
+            FROM pregame_prices
+            WHERE rn = 1 AND kalshi_close >= $1
         ),
-        favorite_wp_changes AS (
+        first_play AS (
+            SELECT DISTINCT ON (p.game_id)
+                p.game_id,
+                p.vegas_wp
+            FROM Plays p
+            WHERE p.vegas_wp IS NOT NULL
+            ORDER BY p.game_id, p.qtr ASC, p.quarter_seconds_remaining DESC, p.play_id ASC
+        ),
+        game_min_wp AS (
             SELECT
                 f.game_id,
                 f.favorite_team,
                 f.pregame_prob,
-                p.play_id,
-                CASE
-                    WHEN f.favorite_team = g.home_team THEN p.wp
-                    WHEN f.favorite_team = g.away_team THEN 1.0 - p.wp
-                END AS favorite_wp,
-                CASE
-                    WHEN f.favorite_team = g.home_team THEN prev_p.wp
-                    WHEN f.favorite_team = g.away_team THEN 1.0 - prev_p.wp
-                END AS prev_favorite_wp
+                CASE WHEN f.favorite_team = g.home_team THEN fp.vegas_wp
+                     ELSE 1.0::float - fp.vegas_wp
+                END AS starting_fav_wp,
+                MIN(CASE WHEN f.favorite_team = g.home_team THEN p.vegas_wp
+                         ELSE 1.0::float - p.vegas_wp
+                    END) AS min_fav_wp
             FROM favorites f
-            JOIN Games g
-                ON g.game_id = f.game_id
-            JOIN Plays p
-                ON p.game_id = f.game_id
-            LEFT JOIN Plays prev_p
-                ON prev_p.game_id = p.game_id
-                AND (
-                    prev_p.qtr,
-                    prev_p.quarter_seconds_remaining,
-                    prev_p.play_id
-                ) = (
-                    SELECT
-                        p2.qtr,
-                        p2.quarter_seconds_remaining,
-                        p2.play_id
-                    FROM Plays p2
-                    WHERE
-                        p2.game_id = p.game_id
-                        AND (
-                            p2.qtr < p.qtr
-                            OR (
-                                p2.qtr = p.qtr
-                                AND p2.quarter_seconds_remaining > p.quarter_seconds_remaining
-                            )
-                            OR (
-                                p2.qtr = p.qtr
-                                AND p2.quarter_seconds_remaining = p.quarter_seconds_remaining
-                                AND p2.play_id < p.play_id
-                            )
-                        )
-                    ORDER BY
-                        p2.qtr DESC,
-                        p2.quarter_seconds_remaining ASC,
-                        p2.play_id DESC
-                    LIMIT 1
-                )
-            WHERE p.wp IS NOT NULL
+            JOIN Games g ON g.game_id = f.game_id
+            JOIN first_play fp ON fp.game_id = f.game_id
+            JOIN Plays p ON p.game_id = f.game_id
+            WHERE p.vegas_wp IS NOT NULL
+              AND NOT (p.qtr = 4 AND p.quarter_seconds_remaining < 120)
+            GROUP BY f.game_id, f.favorite_team, f.pregame_prob, g.home_team, fp.vegas_wp
         ),
-        favorite_adversity AS (
+        game_summary AS (
             SELECT
-                game_id,
-                favorite_team,
-                pregame_prob,
-                CASE
-                    WHEN MIN(favorite_wp - prev_favorite_wp) <= -$2 THEN 1
-                    ELSE 0
-                END AS experienced_major_adversity
-            FROM favorite_wp_changes
-            GROUP BY
-                game_id,
-                favorite_team,
-                pregame_prob
-        ),
-        favorite_results AS (
-            SELECT
-                fa.game_id,
-                fa.favorite_team,
-                fa.pregame_prob,
-                fa.experienced_major_adversity,
-                gr.winner,
-                CASE
-                    WHEN gr.winner = fa.favorite_team THEN 1
-                    ELSE 0
-                END AS favorite_won
-            FROM favorite_adversity fa
-            JOIN game_results gr
-                ON gr.game_id = fa.game_id
-            WHERE gr.winner IS NOT NULL
+                game_id, favorite_team, pregame_prob,
+                CASE WHEN min_fav_wp <= starting_fav_wp - $2::float THEN 1 ELSE 0 END AS had_adversity
+            FROM game_min_wp
         )
         SELECT
-            experienced_major_adversity,
+            gs.had_adversity AS experienced_major_adversity,
             COUNT(*) AS num_games,
-            ROUND(AVG(pregame_prob)::numeric, 3) AS avg_pregame_prob,
-            ROUND(AVG(favorite_won)::numeric, 3) AS favorite_win_rate
-        FROM favorite_results
-        GROUP BY experienced_major_adversity
-        ORDER BY experienced_major_adversity
+            ROUND(AVG(gs.pregame_prob)::numeric, 3) AS avg_pregame_prob,
+            ROUND(AVG(CASE WHEN gr.winner = gs.favorite_team THEN 1.0 ELSE 0.0 END)::numeric, 3) AS favorite_win_rate
+        FROM game_summary gs
+        JOIN game_results gr ON gr.game_id = gs.game_id
+        WHERE gr.winner IS NOT NULL
+        GROUP BY gs.had_adversity
+        ORDER BY gs.had_adversity
     `,
     [favoriteThreshold, adversityDrop],
     (err, data) => {
       if (err) {
-        console.log(err);
-        res.json([]);
+        console.error("Adversity query error:", err.message);
+        res.json({ queryError: err.message });
       } else {
+        if (data.rows.length > 0) setCached(cacheKey, data.rows);
         res.json(data.rows);
       }
     },
@@ -254,6 +217,10 @@ const getFavoriteAdversityPerformance = async function (req, res) {
 // Route 4: GET /market/accuracy-by-week
 
 const getMarketAccuracyByWeek = async function (req, res) {
+  const cacheKey = "accuracy-by-week";
+  const cached = getCached(cacheKey);
+  if (cached) return res.json(cached);
+
   connection.query(
     `
         WITH game_level AS (
@@ -287,6 +254,7 @@ const getMarketAccuracyByWeek = async function (req, res) {
         console.log(err);
         res.json([]);
       } else {
+        setCached(cacheKey, data.rows);
         res.json(data.rows);
       }
     },
@@ -522,57 +490,229 @@ const getMarketHistoryByTeam = async function (req, res) {
 // Route 10: GET /markets/early-hype-fade
 
 const getEarlyHypeFadeMarkets = async function (req, res) {
-  const minEarlyVolumeShare = req.query.min_early_volume_share ?? 0.3;
-  const windowSize = req.query.window_size ?? 5;
+  const minEarlyVolumeShare = parseFloat(req.query.min_early_volume_share ?? 0.3);
+  const windowSize = parseInt(req.query.window_size ?? 5);
+  const cacheKey = `hype-fade-${minEarlyVolumeShare}-${windowSize}`;
+  const cached = getCached(cacheKey);
+  if (cached) return res.json(cached);
 
   connection.query(
     `
         WITH ranked AS (
             SELECT
                 market_ticker,
-                datetime_utc,
                 kalshi_close,
                 kalshi_volume,
-                ROW_NUMBER() OVER (
-                    PARTITION BY market_ticker
-                    ORDER BY datetime_utc
-                ) AS rn,
-                COUNT(*) OVER (
-                    PARTITION BY market_ticker
-                ) AS total_rows
+                ROW_NUMBER() OVER (PARTITION BY market_ticker ORDER BY datetime_utc ASC) AS rn,
+                COUNT(*) OVER (PARTITION BY market_ticker) AS total_rows
             FROM Kalshi_Prices
+            WHERE kalshi_close > 0
         ),
         per_market AS (
             SELECT
                 market_ticker,
-                SUM(CASE WHEN rn <= ${windowSize} THEN kalshi_volume ELSE 0 END) AS first_5m_volume,
+                SUM(CASE WHEN rn <= $2 THEN kalshi_volume ELSE 0 END) AS first_window_volume,
                 SUM(kalshi_volume) AS total_volume,
-                AVG(CASE WHEN rn <= ${windowSize} THEN kalshi_close END) AS early_price,
-                AVG(CASE WHEN rn > total_rows - ${windowSize} THEN kalshi_close END) AS late_price
+                AVG(CASE WHEN rn <= $2 THEN kalshi_close END) AS early_price,
+                AVG(CASE WHEN rn > total_rows - $2 THEN kalshi_close END) AS late_price,
+                MAX(total_rows) AS num_candles
             FROM ranked
             GROUP BY market_ticker
+            HAVING MAX(total_rows) >= $2 * 2
         )
         SELECT
-            market_ticker,
-            first_5m_volume,
-            total_volume,
-            1.0 * first_5m_volume / NULLIF(total_volume, 0) AS early_volume_share,
-            early_price,
-            late_price,
-            late_price - early_price AS price_change
-        FROM per_market
+            pm.market_ticker,
+            km.target_team,
+            pm.first_window_volume,
+            pm.total_volume,
+            ROUND((1.0 * pm.first_window_volume / NULLIF(pm.total_volume, 0))::numeric, 3) AS early_volume_share,
+            ROUND(pm.early_price::numeric, 3) AS early_price,
+            ROUND(pm.late_price::numeric, 3) AS late_price,
+            ROUND((pm.late_price - pm.early_price)::numeric, 3) AS price_change,
+            pm.num_candles
+        FROM per_market pm
+        JOIN Kalshi_Markets km ON pm.market_ticker = km.market_ticker
         WHERE
-            1.0 * first_5m_volume / NULLIF(total_volume, 0) >= ${minEarlyVolumeShare}
-            AND late_price < early_price
+            pm.early_price IS NOT NULL
+            AND pm.late_price IS NOT NULL
+            AND pm.early_price - pm.late_price >= $1
         ORDER BY
-            early_volume_share DESC,
-            price_change ASC        
+            price_change ASC,
+            early_price DESC
+    `,
+    [minEarlyVolumeShare, windowSize],
+    (err, data) => {
+      if (err) {
+        console.log(err);
+        res.json([]);
+      } else {
+        setCached(cacheKey, data.rows);
+        res.json(data.rows);
+      }
+    },
+  );
+};
+
+// Route 11: GET /games/coverage (EXISTS / NOT EXISTS)
+
+const getGameCoverage = async function (req, res) {
+  const cacheKey = "game-coverage";
+  const cached = getCached(cacheKey);
+  if (cached) return res.json(cached);
+
+  connection.query(
+    `
+        SELECT
+            COUNT(*) AS total_games,
+            COUNT(CASE WHEN EXISTS (
+                SELECT 1 FROM Kalshi_Markets km WHERE km.game_id = g.game_id
+            ) THEN 1 END) AS games_with_kalshi,
+            COUNT(CASE WHEN NOT EXISTS (
+                SELECT 1 FROM Kalshi_Markets km WHERE km.game_id = g.game_id
+            ) THEN 1 END) AS games_without_kalshi,
+            COUNT(CASE WHEN EXISTS (
+                SELECT 1 FROM Plays p WHERE p.game_id = g.game_id
+            ) THEN 1 END) AS games_with_plays,
+            COUNT(CASE WHEN EXISTS (
+                SELECT 1 FROM Kalshi_Markets km WHERE km.game_id = g.game_id
+            ) AND EXISTS (
+                SELECT 1 FROM Plays p WHERE p.game_id = g.game_id
+            ) THEN 1 END) AS games_with_complete_data
+        FROM Games g
+    `,
+    (err, data) => {
+      if (err) {
+        console.log(err);
+        res.json({});
+      } else {
+        setCached(cacheKey, data.rows[0]);
+        res.json(data.rows[0]);
+      }
+    },
+  );
+};
+
+// Route 12: GET /market/vegas-vs-kalshi
+
+const getVegasVsKalshi = async function (req, res) {
+  const cacheKey = "vegas-vs-kalshi";
+  const cached = getCached(cacheKey);
+  if (cached) return res.json(cached);
+
+  connection.query(
+    `
+        WITH first_play AS (
+            SELECT DISTINCT ON (p.game_id)
+                p.game_id,
+                p.vegas_wp AS home_vegas_wp
+            FROM Plays p
+            WHERE p.vegas_wp IS NOT NULL
+            ORDER BY p.game_id, p.qtr ASC, p.quarter_seconds_remaining DESC, p.play_id ASC
+        ),
+        game_comparison AS (
+            SELECT
+                g.week,
+                pp.game_id,
+                pp.kalshi_close AS kalshi_prob,
+                CASE
+                    WHEN pp.target_team = g.home_team THEN fp.home_vegas_wp
+                    WHEN pp.target_team = g.away_team THEN 1.0::float - fp.home_vegas_wp
+                END AS vegas_pregame_wp
+            FROM pregame_prices pp
+            JOIN Games g ON g.game_id = pp.game_id
+            JOIN first_play fp ON fp.game_id = pp.game_id
+            WHERE pp.rn = 1
+              AND g.week BETWEEN 1 AND 18
+        )
+        SELECT
+            week,
+            COUNT(*) AS num_games,
+            ROUND(AVG(kalshi_prob)::numeric, 3) AS avg_kalshi_prob,
+            ROUND(AVG(vegas_pregame_wp)::numeric, 3) AS avg_vegas_wp,
+            ROUND(AVG(kalshi_prob - vegas_pregame_wp)::numeric, 3) AS avg_diff
+        FROM game_comparison
+        WHERE vegas_pregame_wp IS NOT NULL
+        GROUP BY week
+        ORDER BY week
     `,
     (err, data) => {
       if (err) {
         console.log(err);
         res.json([]);
       } else {
+        setCached(cacheKey, data.rows);
+        res.json(data.rows);
+      }
+    },
+  );
+};
+
+// Route 13a: GET /debug/timestamps — diagnose timestamp overlap between Plays and Kalshi_Prices
+const getTimestampDebug = async function (req, res) {
+  connection.query(
+    `
+        SELECT
+            (SELECT COUNT(*) FROM Plays WHERE timestamp_utc IS NOT NULL) AS plays_with_ts,
+            (SELECT COUNT(*) FROM Plays)                                  AS plays_total,
+            (SELECT MIN(timestamp_utc) FROM Plays WHERE timestamp_utc IS NOT NULL) AS plays_ts_min,
+            (SELECT MAX(timestamp_utc) FROM Plays WHERE timestamp_utc IS NOT NULL) AS plays_ts_max,
+            (SELECT MIN(datetime_utc) FROM Kalshi_Prices)                 AS kalshi_ts_min,
+            (SELECT MAX(datetime_utc) FROM Kalshi_Prices)                 AS kalshi_ts_max,
+            (SELECT COUNT(DISTINCT p.game_id)
+               FROM Plays p
+               JOIN Kalshi_Markets km ON km.game_id = p.game_id
+               JOIN Kalshi_Prices kp ON kp.market_ticker = km.market_ticker
+                 AND (kp.datetime_utc AT TIME ZONE 'America/New_York')
+                     BETWEEN p.timestamp_utc - INTERVAL '10 minutes'
+                         AND p.timestamp_utc + INTERVAL '10 minutes'
+               WHERE p.timestamp_utc IS NOT NULL
+            ) AS games_with_ts_overlap
+    `,
+    (err, data) => {
+      if (err) res.json({ error: err.message });
+      else res.json(data.rows[0]);
+    },
+  );
+};
+
+// Route 13: GET /market/score-vs-market
+// 4-table timestamp join: Plays + Games + Kalshi_Markets + Kalshi_Prices
+// For each in-game score differential, find the concurrent Kalshi price
+const getScoreVsMarket = async function (req, res) {
+  const cacheKey = "score-vs-market";
+  const cached = getCached(cacheKey);
+  if (cached) return res.json(cached);
+
+  connection.query(
+    `
+        SELECT
+            (p.total_home_score - p.total_away_score) AS score_diff,
+            COUNT(*)                                   AS num_observations,
+            ROUND(AVG(kp.kalshi_close)::numeric, 3)   AS avg_kalshi_home_price,
+            ROUND(AVG(p.vegas_wp)::numeric, 3)         AS avg_vegas_wp
+        FROM Plays p
+        JOIN Games g ON g.game_id = p.game_id
+        JOIN Kalshi_Markets km
+            ON km.game_id = p.game_id
+           AND km.target_team = g.home_team
+        JOIN Kalshi_Prices kp
+            ON kp.market_ticker = km.market_ticker
+           AND (kp.datetime_utc AT TIME ZONE 'America/New_York')
+               BETWEEN p.timestamp_utc - INTERVAL '2 minutes'
+                   AND p.timestamp_utc
+        WHERE p.timestamp_utc IS NOT NULL
+          AND p.vegas_wp      IS NOT NULL
+          AND p.qtr BETWEEN 1 AND 4
+        GROUP BY score_diff
+        HAVING COUNT(*) >= 100
+        ORDER BY score_diff
+    `,
+    (err, data) => {
+      if (err) {
+        console.error("Score vs market error:", err.message);
+        res.json({ queryError: err.message });
+      } else {
+        if (data.rows.length > 0) setCached(cacheKey, data.rows);
         res.json(data.rows);
       }
     },
@@ -590,4 +730,8 @@ module.exports = {
   getFavoriteCalibration,
   getMarketHistoryByTeam,
   getEarlyHypeFadeMarkets,
+  getGameCoverage,
+  getVegasVsKalshi,
+  getScoreVsMarket,
+  getTimestampDebug,
 };

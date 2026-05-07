@@ -103,3 +103,9 @@ SELECT
 FROM pregame_prices pp
 JOIN game_results gr ON pp.game_id = gr.game_id
 WHERE pp.rn = 1;
+
+-- Indexes for query performance
+CREATE INDEX IF NOT EXISTS idx_plays_game ON Plays(game_id, qtr, quarter_seconds_remaining);
+CREATE INDEX IF NOT EXISTS idx_kalshi_prices_ticker_time ON Kalshi_Prices(market_ticker, datetime_utc);
+CREATE INDEX IF NOT EXISTS idx_kalshi_markets_team ON Kalshi_Markets(target_team);
+CREATE INDEX IF NOT EXISTS idx_plays_wp ON Plays(game_id, wp) WHERE wp IS NOT NULL;
