@@ -21,7 +21,7 @@ const AdversityPage = () => {
   const fetchData = (threshold, drop) => {
     setLoading(true);
     fetch(
-      `http://${config.server_host}:${config.server_port}/favorites/adversity-performance?favorite_threshold=${threshold}&adversity_drop=${drop}`
+      `${config.api_base_url}/favorites/adversity-performance?favorite_threshold=${threshold}&adversity_drop=${drop}`
     )
       .then((res) => res.json())
       .then((json) => {

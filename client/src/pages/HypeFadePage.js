@@ -23,7 +23,7 @@ const HypeFadePage = () => {
   const fetchData = (drop, window) => {
     setLoading(true);
     fetch(
-      `http://${config.server_host}:${config.server_port}/markets/early-hype-fade?min_early_volume_share=${drop}&window_size=${window}`
+      `${config.api_base_url}/markets/early-hype-fade?min_early_volume_share=${drop}&window_size=${window}`
     )
       .then((res) => res.json())
       .then((json) => {

@@ -23,7 +23,7 @@ const TeamMarketBiasPage = () => {
   const fetchData = (games) => {
     setLoading(true);
     fetch(
-      `http://${config.server_host}:${config.server_port}/teams/market-bias?min_games=${games}`
+      `${config.api_base_url}/teams/market-bias?min_games=${games}`
     )
       .then((res) => res.json())
       .then((json) => {

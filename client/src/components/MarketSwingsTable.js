@@ -11,7 +11,7 @@ const MarketSwingsTable = ({ filters = {} }) => {
   useEffect(() => {
     const limit = filters.limit || 50;
     fetch(
-      `http://${config.server_host}:${config.server_port}/games/market-swings?limit=${limit}`
+      `${config.api_base_url}/games/market-swings?limit=${limit}`
     )
       .then((res) => res.json())
       .then((json) => {

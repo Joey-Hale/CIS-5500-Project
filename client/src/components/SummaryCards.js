@@ -18,16 +18,16 @@ const SummaryCards = ({ filters = {} }) => {
           accuracyRes,
         ] = await Promise.all([
           fetch(
-            `http://${config.server_host}:${config.server_port}/favorites/win-rate?min_prob=${minProb}`
+            `${config.api_base_url}/favorites/win-rate?min_prob=${minProb}`
           ),
           fetch(
-            `http://${config.server_host}:${config.server_port}/underdogs/win-rate?max_prob=${(1 - minProb).toFixed(2)}`
+            `${config.api_base_url}/underdogs/win-rate?max_prob=${(1 - minProb).toFixed(2)}`
           ),
           fetch(
-            `http://${config.server_host}:${config.server_port}/market/volatility-comparison?volatility_threshold=${volatilityThreshold}`
+            `${config.api_base_url}/market/volatility-comparison?volatility_threshold=${volatilityThreshold}`
           ),
           fetch(
-            `http://${config.server_host}:${config.server_port}/market/accuracy-by-week`
+            `${config.api_base_url}/market/accuracy-by-week`
           ),
         ]);
 

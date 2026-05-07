@@ -16,7 +16,7 @@ const Dashboard = () => {
   };
 
   useEffect(() => {
-    fetch(`http://${config.server_host}:${config.server_port}/games/coverage`)
+    fetch(`${config.api_base_url}/games/coverage`)
       .then((res) => res.json())
       .then((json) => setCoverage(Array.isArray(json) ? json[0] : json))
       .catch(() => {});

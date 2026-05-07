@@ -74,7 +74,7 @@ const TeamMarketHistoryPage = () => {
     setError(null);
     try {
       const response = await fetch(
-        `http://${config.server_host}:${config.server_port}/markets/${team}`,
+        `${config.api_base_url}/markets/${team}`,
       );
       const result = await response.json();
 

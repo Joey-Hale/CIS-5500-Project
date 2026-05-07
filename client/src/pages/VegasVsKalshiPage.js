@@ -20,7 +20,7 @@ const VegasVsKalshiPage = () => {
   const [error, setError] = useState(null);
 
   useEffect(() => {
-    fetch(`http://${config.server_host}:${config.server_port}/market/vegas-vs-kalshi`)
+    fetch(`${config.api_base_url}/market/vegas-vs-kalshi`)
       .then((res) => res.json())
       .then((json) => {
         setData(json);

@@ -18,7 +18,7 @@ const FavoriteCalibrationChart = () => {
 
   useEffect(() => {
     fetch(
-      `http://${config.server_host}:${config.server_port}/favorites/calibration`
+      `${config.api_base_url}/favorites/calibration`
     )
       .then((res) => res.json())
       .then((json) => {

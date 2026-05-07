@@ -21,7 +21,7 @@ const MarketAccuracyChart = () => {
 
   useEffect(() => {
     fetch(
-      `http://${config.server_host}:${config.server_port}/market/accuracy-by-week`
+      `${config.api_base_url}/market/accuracy-by-week`
     )
       .then((res) => res.json())
       .then((json) => {

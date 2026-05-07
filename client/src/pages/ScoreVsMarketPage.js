@@ -17,7 +17,7 @@ const ScoreVsMarketPage = () => {
   const [error, setError] = useState(null);
 
   useEffect(() => {
-    fetch(`http://${config.server_host}:${config.server_port}/market/score-vs-market`)
+    fetch(`${config.api_base_url}/market/score-vs-market`)
       .then((res) => res.json())
       .then((json) => {
         if (json.queryError) {

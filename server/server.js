@@ -23,8 +23,9 @@ app.get('/markets/:team', routes.getMarketHistoryByTeam);
 app.get('/market/score-vs-market', routes.getScoreVsMarket);
 app.get('/debug/timestamps', routes.getTimestampDebug);
 
-app.listen(config.server_port, () => {
-    console.log(`Server running at http://${config.server_host}:${config.server_port}/`)
+const port = process.env.PORT || config.server_port;
+app.listen(port, () => {
+    console.log(`Server running at http://${config.server_host}:${port}/`)
 });
 
 module.exports = app;
