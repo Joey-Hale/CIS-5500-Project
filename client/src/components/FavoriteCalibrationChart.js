@@ -11,14 +11,32 @@ import {
 } from "recharts";
 const config = require("../config.json");
 
-const FavoriteCalibrationChart = () => {
+const FavoriteCalibrationChart = ({ filters = {} }) => {
   const [data, setData] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
+  const buildQueryString = () => {
+    const params = new URLSearchParams();
+
+    if (filters.favorite_threshold !== undefined) {
+      params.append("favorite_threshold", filters.favorite_threshold);
+    }
+
+    if (filters.min_games !== undefined) {
+      params.append("min_games", filters.min_games);
+    }
+
+    const queryString = params.toString();
+    return queryString ? `?${queryString}` : "";
+  };
+
   useEffect(() => {
+    setLoading(true);
+    setError(null);
+
     fetch(
-      `http://${config.server_host}:${config.server_port}/favorites/calibration`
+      `http://${config.server_host}:${config.server_port}/favorites/calibration${buildQueryString()}`
     )
       .then((res) => res.json())
       .then((json) => {
@@ -39,7 +57,7 @@ const FavoriteCalibrationChart = () => {
         setError("Failed to load calibration data");
         setLoading(false);
       });
-  }, []);
+  }, [filters]);
 
   if (loading) return <div className="loading">Loading Calibration Data</div>;
   if (error) return <div className="error">{error}</div>;
@@ -56,6 +74,9 @@ const FavoriteCalibrationChart = () => {
       <h2>Favorite Calibration Analysis</h2>
       <p style={{ color: "#757575", marginBottom: "1rem" }}>
         Comparison of predicted vs actual win rates by favorite strength
+        {filters.favorite_threshold
+          ? ` · Favorite threshold: ${filters.favorite_threshold}`
+          : ""}
       </p>
 
       <ResponsiveContainer width="100%" height={350}>
@@ -97,7 +118,8 @@ const FavoriteCalibrationChart = () => {
                     fontWeight: 600,
                   }}
                 >
-                  {calibration > 0 ? "+" : ""}{calibration}
+                  {calibration > 0 ? "+" : ""}
+                  {calibration}
                 </td>
               </tr>
             );

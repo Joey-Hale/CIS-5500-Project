@@ -62,8 +62,8 @@ const Dashboard = () => {
       <FiltersPanel filters={filters} setFilters={setFilters} onApply={handleApply} />
       <SummaryCards filters={appliedFilters} />
       <div className="visualizations">
-        <MarketAccuracyChart />
-        <FavoriteCalibrationChart />
+        <MarketAccuracyChart filters={appliedFilters} />
+        <FavoriteCalibrationChart filters={appliedFilters} />
         <MarketSwingsTable filters={appliedFilters} />
       </div>
     </div>
