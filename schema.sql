@@ -105,7 +105,31 @@ JOIN game_results gr ON pp.game_id = gr.game_id
 WHERE pp.rn = 1;
 
 -- Indexes for query performance
+
+-- Original indexes
 CREATE INDEX IF NOT EXISTS idx_plays_game ON Plays(game_id, qtr, quarter_seconds_remaining);
 CREATE INDEX IF NOT EXISTS idx_kalshi_prices_ticker_time ON Kalshi_Prices(market_ticker, datetime_utc);
 CREATE INDEX IF NOT EXISTS idx_kalshi_markets_team ON Kalshi_Markets(target_team);
 CREATE INDEX IF NOT EXISTS idx_plays_wp ON Plays(game_id, wp) WHERE wp IS NOT NULL;
+
+-- Covering index for first_play CTE pattern (Adversity, Vegas vs Kalshi routes)
+-- Matches ORDER BY game_id ASC, qtr ASC, quarter_seconds_remaining DESC, play_id ASC
+-- INCLUDE(vegas_wp) enables index-only scan — no heap fetch needed
+CREATE INDEX IF NOT EXISTS idx_plays_first_play
+    ON Plays (game_id ASC, qtr ASC, quarter_seconds_remaining DESC, play_id ASC)
+    INCLUDE (vegas_wp)
+    WHERE vegas_wp IS NOT NULL;
+
+-- Covering index for game_results view (last play of each game)
+-- Matches ORDER BY game_id ASC, qtr DESC, quarter_seconds_remaining ASC, play_id DESC
+-- INCLUDE(total_home_score, total_away_score) enables index-only scan
+CREATE INDEX IF NOT EXISTS idx_plays_last_play
+    ON Plays (game_id ASC, qtr DESC, quarter_seconds_remaining ASC, play_id DESC)
+    INCLUDE (total_home_score, total_away_score);
+
+-- Functional index for Score vs Market timestamp join
+-- AT TIME ZONE 'America/New_York' is a non-sargable expression — the plain datetime_utc
+-- index cannot be used for range scans when wrapped in this function.
+-- This pre-computes the Eastern Time value so BETWEEN can use an index range scan.
+CREATE INDEX IF NOT EXISTS idx_kalshi_prices_ticker_et
+    ON Kalshi_Prices (market_ticker, (datetime_utc AT TIME ZONE 'America/New_York'));

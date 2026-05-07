@@ -601,7 +601,7 @@ const getVegasVsKalshi = async function (req, res) {
 
   connection.query(
     `
-        WITH first_play AS (
+        WITH first_play AS MATERIALIZED (
             SELECT DISTINCT ON (p.game_id)
                 p.game_id,
                 p.vegas_wp AS home_vegas_wp
@@ -695,11 +695,16 @@ const getScoreVsMarket = async function (req, res) {
         JOIN Kalshi_Markets km
             ON km.game_id = p.game_id
            AND km.target_team = g.home_team
-        JOIN Kalshi_Prices kp
-            ON kp.market_ticker = km.market_ticker
-           AND (kp.datetime_utc AT TIME ZONE 'America/New_York')
-               BETWEEN p.timestamp_utc - INTERVAL '2 minutes'
-                   AND p.timestamp_utc
+        JOIN LATERAL (
+            SELECT kalshi_close
+            FROM Kalshi_Prices kp
+            WHERE kp.market_ticker = km.market_ticker
+              AND kp.datetime_utc
+                  BETWEEN ((p.timestamp_utc AT TIME ZONE 'UTC') AT TIME ZONE 'America/New_York') - INTERVAL '2 minutes'
+                      AND  ((p.timestamp_utc AT TIME ZONE 'UTC') AT TIME ZONE 'America/New_York')
+            ORDER BY kp.datetime_utc DESC
+            LIMIT 1
+        ) kp ON true
         WHERE p.timestamp_utc IS NOT NULL
           AND p.vegas_wp      IS NOT NULL
           AND p.qtr BETWEEN 1 AND 4
