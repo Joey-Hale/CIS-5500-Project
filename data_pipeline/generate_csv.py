@@ -262,21 +262,13 @@ def build_final_database():
                 low_p   = float(p_data.get('low') or 0)
                 close_p = float(p_data.get('close') or 0)
 
-                # Probability flip logic based on home team (Invert high/low if flipping)
-                is_away = m['ticker'].split("-")[-1] == away
-
-                home_open  = (1.0 - open_p)  if is_away else open_p
-                home_high  = (1.0 - low_p)   if is_away else high_p
-                home_low   = (1.0 - high_p)  if is_away else low_p
-                home_close = (1.0 - close_p) if is_away else close_p
-
                 all_prices.append({
                     "market_ticker": m['ticker'],
                     "datetime_utc": datetime.fromtimestamp(c.get('end_period_ts')).strftime("%Y-%m-%dT%H:%M:%S.%f"),
-                    "kalshi_open": home_open,
-                    "kalshi_high": home_high,
-                    "kalshi_low": home_low,
-                    "kalshi_close": home_close,
+                    "kalshi_open":   open_p,
+                    "kalshi_high":   high_p,
+                    "kalshi_low":    low_p,
+                    "kalshi_close":  close_p,
                     "kalshi_volume": int(float(c.get('volume', '0')))
                 })
         time.sleep(0.5)

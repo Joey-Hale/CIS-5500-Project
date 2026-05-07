@@ -18,44 +18,9 @@ connection.connect((err) => err && console.log(err));
 
 // Route 1: GET /teams/market-bias
 const getTeamMarketBias = async function (req, res) {
-  const minGames = req.query.min_games ?? 5;
+  const minGames = parseInt(req.query.min_games ?? 5);
   connection.query(
     `
-        CREATE VIEW pregame_prices AS
-        SELECT
-            km.market_ticker,
-            km.game_id,
-            km.target_team,
-            kp.kalshi_close,
-            ROW_NUMBER() OVER (
-                PARTITION BY km.market_ticker
-                ORDER BY kp.datetime_utc DESC
-            ) AS rn
-        FROM Kalshi_Markets km
-        JOIN Games g
-            ON km.game_id = g.game_id
-        JOIN Kalshi_Prices kp
-            ON km.market_ticker = kp.market_ticker
-        WHERE kp.datetime_utc <= g.game_date::timestamp;
-
-
-        CREATE VIEW game_results AS
-        SELECT DISTINCT ON (p.game_id)
-            p.game_id,
-            CASE
-                WHEN p.total_home_score > p.total_away_score THEN g.home_team
-                WHEN p.total_away_score > p.total_home_score THEN g.away_team
-            END AS winner
-        FROM Plays p
-        JOIN Games g
-            ON p.game_id = g.game_id
-        ORDER BY
-            p.game_id,
-            p.qtr DESC,
-            p.quarter_seconds_remaining ASC,
-            p.play_id DESC;
-
-
         SELECT
             pp.target_team,
             COUNT(*) AS num_games,
@@ -87,9 +52,10 @@ const getTeamMarketBias = async function (req, res) {
             AND gr.winner IS NOT NULL
         GROUP BY
             pp.target_team
-        HAVING COUNT(*) >= ${minGames}
+        HAVING COUNT(*) >= $1
         ORDER BY avg_signed_error DESC
     `,
+    [minGames],
     (err, data) => {
       if (err) {
         console.log(err);
@@ -104,7 +70,7 @@ const getTeamMarketBias = async function (req, res) {
 // Route 2: GET /games/market-swings
 
 const getLargestMarketSwings = async function (req, res) {
-  const limit = req.query.limit ?? 20;
+  const limit = parseInt(req.query.limit ?? 20);
 
   connection.query(
     `
@@ -120,6 +86,7 @@ const getLargestMarketSwings = async function (req, res) {
             JOIN Kalshi_Prices kp
                 ON km.market_ticker = kp.market_ticker
             WHERE kp.datetime_utc >= g.game_date::timestamp
+              AND kp.kalshi_close > 0
         ),
         market_swings AS (
             SELECT
@@ -147,8 +114,9 @@ const getLargestMarketSwings = async function (req, res) {
         JOIN Games g
             ON ms.game_id = g.game_id
         ORDER BY ms.price_swing DESC
-        LIMIT ${limit}
+        LIMIT $1
     `,
+    [limit],
     (err, data) => {
       if (err) {
         console.log(err);
@@ -163,8 +131,8 @@ const getLargestMarketSwings = async function (req, res) {
 // Route 3: GET /favorites/adversity-performance
 
 const getFavoriteAdversityPerformance = async function (req, res) {
-  const favoriteThreshold = req.query.favorite_threshold ?? 0.75;
-  const adversityDrop = req.query.adversity_drop ?? 0.15;
+  const favoriteThreshold = parseFloat(req.query.favorite_threshold ?? 0.75);
+  const adversityDrop = parseFloat(req.query.adversity_drop ?? 0.15);
 
   connection.query(
     `
@@ -176,7 +144,7 @@ const getFavoriteAdversityPerformance = async function (req, res) {
             FROM pregame_prices pp
             WHERE
                 pp.rn = 1
-                AND pp.kalshi_close >= ${favoriteThreshold}
+                AND pp.kalshi_close >= $1
         ),
         favorite_wp_changes AS (
             SELECT
@@ -237,7 +205,7 @@ const getFavoriteAdversityPerformance = async function (req, res) {
                 favorite_team,
                 pregame_prob,
                 CASE
-                    WHEN MIN(favorite_wp - prev_favorite_wp) <= -${adversityDrop} THEN 1
+                    WHEN MIN(favorite_wp - prev_favorite_wp) <= -$2 THEN 1
                     ELSE 0
                 END AS experienced_major_adversity
             FROM favorite_wp_changes
@@ -271,6 +239,7 @@ const getFavoriteAdversityPerformance = async function (req, res) {
         GROUP BY experienced_major_adversity
         ORDER BY experienced_major_adversity
     `,
+    [favoriteThreshold, adversityDrop],
     (err, data) => {
       if (err) {
         console.log(err);
@@ -384,11 +353,19 @@ const getVolatilityComparison = async function (req, res) {
 // Route 6: GET /underdogs/win-rate
 
 const getUnderdogWinRate = async function (req, res) {
-  const maxProb = req.query.max_prob ?? 0.4;
+  const maxProb = parseFloat(req.query.max_prob ?? 0.4);
 
   connection.query(
     `
-        WITH underdogs AS (
+        WITH game_volatility AS (
+            SELECT
+                km.game_id,
+                MAX(kp.kalshi_close) - MIN(kp.kalshi_close) AS price_swing
+            FROM Kalshi_Markets km
+            JOIN Kalshi_Prices kp ON km.market_ticker = kp.market_ticker
+            GROUP BY km.game_id
+        ),
+        underdogs AS (
             SELECT
                 gv.game_id,
                 pp.target_team,
@@ -404,14 +381,15 @@ const getUnderdogWinRate = async function (req, res) {
                 ON gv.game_id = gr.game_id
             WHERE
                 pp.rn = 1
-                AND pp.kalshi_close <= ${maxProb}
+                AND pp.kalshi_close <= $1
         )
         SELECT
             COUNT(*) AS total_underdog_games,
             SUM(win) AS underdog_wins,
             ROUND(AVG(win)::numeric, 3) AS underdog_win_rate
-        FROM underdogs        
+        FROM underdogs
     `,
+    [maxProb],
     (err, data) => {
       if (err) {
         console.log(err);
@@ -468,18 +446,32 @@ const getFavoriteWinRate = async function (req, res) {
 const getFavoriteCalibration = async function (req, res) {
   connection.query(
     `
+        WITH favorite_summary AS (
+            SELECT
+                pp.game_id,
+                pp.target_team AS favorite_team,
+                pp.kalshi_close AS favorite_prob,
+                CASE
+                    WHEN gr.winner = pp.target_team THEN 1.0
+                    ELSE 0.0
+                END AS favorite_won
+            FROM pregame_prices pp
+            JOIN game_results gr ON pp.game_id = gr.game_id
+            WHERE pp.rn = 1
+              AND pp.kalshi_close >= 0.5
+        )
         SELECT
             CASE
                 WHEN favorite_prob >= 0.8 THEN 'strong_favorite'
                 WHEN favorite_prob >= 0.6 THEN 'moderate_favorite'
-                ELSE 'weak_favorite'
+                ELSE 'slight_favorite'
             END AS favorite_strength,
             COUNT(*) AS num_games,
             ROUND(AVG(favorite_prob)::numeric, 2) AS avg_predicted,
             ROUND(AVG(favorite_won)::numeric, 2) AS actual_win_rate
         FROM favorite_summary
         GROUP BY favorite_strength
-        ORDER BY favorite_strength        
+        ORDER BY favorite_strength
     `,
     (err, data) => {
       if (err) {
@@ -548,7 +540,7 @@ const getEarlyHypeFadeMarkets = async function (req, res) {
                 COUNT(*) OVER (
                     PARTITION BY market_ticker
                 ) AS total_rows
-            FROM your_table
+            FROM Kalshi_Prices
         ),
         per_market AS (
             SELECT
