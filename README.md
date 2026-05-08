@@ -57,3 +57,22 @@ Install required dependencies
 ```text
 pip install -r requirements.txt
 ```
+
+Open two terminal windows.
+
+In the first terminal, start the server:
+
+```text
+cd server
+npm install
+npm start
+```
+
+In the second terminal, start the client:
+```text
+cd client
+npm install
+npm start
+```
+
+
